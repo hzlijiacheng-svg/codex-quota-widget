@@ -56,6 +56,23 @@ public enum QuotaPaceCalculator {
         )
     }
 
+    public static func calendarWorkweekElapsedPercent(
+        now: Date,
+        calendar: Calendar = .current
+    ) -> Double {
+        let startOfToday = calendar.startOfDay(for: now)
+        let weekday = calendar.component(.weekday, from: startOfToday)
+        let daysSinceMonday = (weekday + 5) % 7
+        guard let monday = calendar.date(byAdding: .day, value: -daysSinceMonday,
+                                         to: startOfToday),
+              let saturday = calendar.date(byAdding: .day, value: 5, to: monday)
+        else { return 0 }
+        let clampedNow = min(saturday, max(monday, now))
+        let duration = saturday.timeIntervalSince(monday)
+        guard duration > 0 else { return 0 }
+        return min(100, max(0, clampedNow.timeIntervalSince(monday) / duration * 100))
+    }
+
     private static func workSeconds(from startAt: Date,
                                     to endAt: Date,
                                     calendar: Calendar) -> TimeInterval {

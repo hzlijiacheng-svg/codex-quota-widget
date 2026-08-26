@@ -2,9 +2,9 @@
 
 macOS 原生菜单栏工具，把 Codex 周额度变成随时可见的“电量表”。无需反复打开命令行：抬眼即可看到剩余额度，点击后还能判断当前消耗是否跑得太快。
 
-[![下载最新版](https://img.shields.io/badge/下载最新版-macOS_通用安装包-7C5CFC?style=for-the-badge&logo=apple)](https://github.com/hzlijiacheng-svg/codex-quota-widget/releases/latest/download/Codex-Weekly-Quota-Menubar-v2.0.1-macOS-universal.zip)
+[![下载最新版](https://img.shields.io/badge/下载最新版-macOS_通用安装包-7C5CFC?style=for-the-badge&logo=apple)](https://github.com/hzlijiacheng-svg/codex-quota-widget/releases/latest/download/Codex-Weekly-Quota-Menubar-v2.0.2-macOS-universal.zip)
 
-**[直接下载 Codex 额度仪表 v2.0.1](https://github.com/hzlijiacheng-svg/codex-quota-widget/releases/latest/download/Codex-Weekly-Quota-Menubar-v2.0.1-macOS-universal.zip)** · [查看全部版本](https://github.com/hzlijiacheng-svg/codex-quota-widget/releases)
+**[直接下载 Codex 额度仪表 v2.0.2](https://github.com/hzlijiacheng-svg/codex-quota-widget/releases/latest/download/Codex-Weekly-Quota-Menubar-v2.0.2-macOS-universal.zip)** · [查看全部版本](https://github.com/hzlijiacheng-svg/codex-quota-widget/releases)
 
 > 支持 macOS 12 及以上、Intel 与 Apple 芯片。当前正式启用 Codex 数据源；GLM/企业 AI 网关仍在适配中。
 
@@ -26,11 +26,11 @@ macOS 原生菜单栏工具，把 Codex 周额度变成随时可见的“电量�
 
 点击菜单栏图标后，三个环形进度会同时展示：
 
-- **本周时间**：当前 7 天额度周期已经过去多少。
-- **工作日已过**：在相同周期内，仅计算周一至周五的进度。
+- **额度周期已过**：当前 Codex 7 天额度周期已经过去多少。
+- **本周工作日**：自然周一至周五已经过去多少，与额度重置日无关。
 - **额度已用**：Codex 周额度已经消耗多少。
 
-工具会直接比较“额度已用”和“工作日已过”，输出“建议稍微省一点”“建议大幅节省”“小额富余”或“大额富余”，避免用户自行换算。工作日口径仅排除周六、周日，暂不识别法定节假日和调休。
+工具会比较同一起止区间的“额度已用”和“额度周期已过”，输出“建议稍微省一点”“建议大幅节省”“小额富余”或“大额富余”，避免错拿自然工作周与不同起点的额度周期比较。本周工作日按周一 00:00 至周六 00:00 计算，暂不识别法定节假日和调休。
 
 ### 重置时间与额度窗口
 
@@ -50,7 +50,7 @@ macOS 原生菜单栏工具，把 Codex 周额度变成随时可见的“电量�
 在带 Touch Bar 的 Mac 上显示细长的周额度仪表：
 
 - 明确标注“Codex 周额度”，不使用含义不明的单字母。
-- 展示长血条、剩余百分比、已用百分比、重置倒计时和工作日节奏。
+- 展示长血条、剩余百分比、已用百分比、重置倒计时和额度周期节奏。
 - 左侧显示额度，右侧继续保留亮度、音量等系统控制。
 - 应用退出或卸载后，恢复启动前的 Touch Bar 显示模式。
 

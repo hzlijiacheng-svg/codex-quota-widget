@@ -74,6 +74,22 @@ let noProxyCandidates = SystemProxyEnvironment.candidates(
 )
 check(noProxyCandidates.count == 1 && noProxyCandidates[0]["PATH"] == "/usr/bin",
       "Codex uses direct access without proxy configuration")
+check(PopoverDismissalPolicy.shouldClose(isGlobalEvent: true,
+                                         isPopoverWindow: false,
+                                         isStatusItemWindow: false),
+      "A click in another application closes the quota popover")
+check(PopoverDismissalPolicy.shouldClose(isGlobalEvent: false,
+                                         isPopoverWindow: false,
+                                         isStatusItemWindow: false),
+      "A click in another local window closes the quota popover")
+check(!PopoverDismissalPolicy.shouldClose(isGlobalEvent: false,
+                                          isPopoverWindow: true,
+                                          isStatusItemWindow: false),
+      "A click inside the quota popover keeps it open")
+check(!PopoverDismissalPolicy.shouldClose(isGlobalEvent: false,
+                                          isPopoverWindow: false,
+                                          isStatusItemWindow: true),
+      "The status item click is left to the toggle action")
 
 var touchBarCalendar = Calendar(identifier: .gregorian)
 touchBarCalendar.timeZone = TimeZone(secondsFromGMT: 0)!
@@ -98,14 +114,13 @@ let touchBarPresentation = TouchBarQuotaPresenter.make(
         updatedAt: touchBarNow,
         sourceDescription: "test"
     ),
-    now: touchBarNow,
-    calendar: touchBarCalendar
+    now: touchBarNow
 )
 check(touchBarPresentation?.title == "Codex 周额度", "Touch Bar uses an explicit title")
 check(touchBarPresentation?.remaining == "79%", "Touch Bar emphasizes remaining quota")
 check(touchBarPresentation?.used == "已用 21%", "Touch Bar explains current usage")
 check(touchBarPresentation?.reset == "5天12小时后重置", "Touch Bar explains the reset cycle")
-check(touchBarPresentation?.pace == "工作日慢 9%", "Touch Bar uses workday pace")
+check(touchBarPresentation?.pace == "周期匹配", "Touch Bar compares quota with its own cycle")
 
 var workdayCalendar = Calendar(identifier: .gregorian)
 workdayCalendar.timeZone = TimeZone(secondsFromGMT: 0)!
@@ -132,6 +147,19 @@ check(abs((workdayPace?.elapsedPercent ?? 0) - 50) < 0.001,
       "Workday pace excludes Saturday and Sunday")
 check(abs((workdayPace?.deltaPercentagePoints ?? 0) - 10) < 0.001,
       "Workday pace compares quota usage with weekday progress")
+let calendarWorkweekWednesday = QuotaPaceCalculator.calendarWorkweekElapsedPercent(
+    now: workdayNow, calendar: workdayCalendar
+)
+check(abs(calendarWorkweekWednesday - 50) < 0.001,
+      "Calendar workweek is halfway through on Wednesday noon")
+let calendarWorkweekSunday = QuotaPaceCalculator.calendarWorkweekElapsedPercent(
+    now: workdayCalendar.date(from: DateComponents(
+        year: 2026, month: 8, day: 30, hour: 12
+    ))!,
+    calendar: workdayCalendar
+)
+check(abs(calendarWorkweekSunday - 100) < 0.001,
+      "Calendar workweek remains complete during the weekend")
 check(DashboardCopy.tokenHeadline(TokenPace(
     todayTokens: 55_600_000,
     baselineTokens: 357_700_000,
@@ -140,20 +168,20 @@ check(DashboardCopy.tokenHeadline(TokenPace(
     sampleDays: 5
 )) == "今天比近期同时段少用 302.1M Token（-84%）",
       "Dashboard token pace states the absolute difference first")
-check(DashboardCopy.workdayComparison(deltaPercentagePoints: 2.4)
-      == "额度比工作日进度快 2% · 建议稍微省一点",
-      "Dashboard explains quota pace against workday progress")
-check(DashboardCopy.workdayComparison(deltaPercentagePoints: 12)
-      == "额度比工作日进度快 12% · 建议大幅节省",
-      "Dashboard warns when workday overuse is large")
-check(DashboardCopy.workdayComparison(deltaPercentagePoints: -4)
-      == "额度比工作日进度慢 4% · 目前小额富余",
-      "Dashboard identifies a small workday surplus")
-check(DashboardCopy.workdayComparison(deltaPercentagePoints: -12)
-      == "额度比工作日进度慢 12% · 目前大额富余",
-      "Dashboard identifies a large workday surplus")
-check(DashboardCopy.workdayComparison(deltaPercentagePoints: 0.8)
-      == "额度与工作日进度基本匹配",
+check(DashboardCopy.cycleComparison(deltaPercentagePoints: 2.4)
+      == "额度比周期进度快 2% · 建议稍微省一点",
+      "Dashboard compares quota with its matching cycle")
+check(DashboardCopy.cycleComparison(deltaPercentagePoints: 12)
+      == "额度比周期进度快 12% · 建议大幅节省",
+      "Dashboard warns when cycle overuse is large")
+check(DashboardCopy.cycleComparison(deltaPercentagePoints: -4)
+      == "额度比周期进度慢 4% · 目前小额富余",
+      "Dashboard identifies a small cycle surplus")
+check(DashboardCopy.cycleComparison(deltaPercentagePoints: -12)
+      == "额度比周期进度慢 12% · 目前大额富余",
+      "Dashboard identifies a large cycle surplus")
+check(DashboardCopy.cycleComparison(deltaPercentagePoints: 0.8)
+      == "额度与周期进度基本匹配",
       "Dashboard avoids advice for rounding noise")
 
 let tokenPace = TokenPaceCalculator.calculate(

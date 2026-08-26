@@ -101,40 +101,40 @@ final class DashboardViewController: NSViewController {
 
     private func addQuotaPace(_ snapshot: ProviderSnapshot) {
         guard let weekly = snapshot.windows.first(where: { $0.kind == .weekly }),
-              let naturalPace = QuotaPaceCalculator.calculate(window: weekly, now: Date()),
-              let workdayPace = QuotaPaceCalculator.calculateWorkday(window: weekly, now: Date())
+              let cyclePace = QuotaPaceCalculator.calculate(window: weekly, now: Date())
         else { return }
+        let calendarWorkweek = QuotaPaceCalculator.calendarWorkweekElapsedPercent(now: Date())
         content.addArrangedSubview(label("额度节奏", size: 13, color: .secondaryLabelColor))
         let rings = NSStackView()
         rings.orientation = .horizontal
         rings.distribution = .fillEqually
         rings.spacing = 4
         rings.widthAnchor.constraint(equalToConstant: 392).isActive = true
-        rings.addArrangedSubview(RingMetricView(title: "本周时间",
-                                               percent: naturalPace.elapsedPercent,
+        rings.addArrangedSubview(RingMetricView(title: "额度周期已过",
+                                               percent: cyclePace.elapsedPercent,
                                                tint: .systemBlue))
-        rings.addArrangedSubview(RingMetricView(title: "工作日已过",
-                                               percent: workdayPace.elapsedPercent,
+        rings.addArrangedSubview(RingMetricView(title: "本周工作日",
+                                               percent: calendarWorkweek,
                                                tint: .systemTeal))
         rings.addArrangedSubview(RingMetricView(title: "额度已用",
-                                               percent: workdayPace.usedPercent,
+                                               percent: cyclePace.usedPercent,
                                                tint: .systemPurple))
         content.addArrangedSubview(rings)
         let insightTint: NSColor
-        if workdayPace.deltaPercentagePoints >= 2 {
+        if cyclePace.deltaPercentagePoints >= 2 {
             insightTint = .systemOrange
-        } else if workdayPace.deltaPercentagePoints <= -2 {
+        } else if cyclePace.deltaPercentagePoints <= -2 {
             insightTint = .systemTeal
         } else {
             insightTint = .systemGreen
         }
         content.addArrangedSubview(InsightBanner(
-            text: DashboardCopy.workdayComparison(
-                deltaPercentagePoints: workdayPace.deltaPercentagePoints
+            text: DashboardCopy.cycleComparison(
+                deltaPercentagePoints: cyclePace.deltaPercentagePoints
             ),
             tint: insightTint
         ))
-        content.addArrangedSubview(label("工作日进度仅排除周六、周日",
+        content.addArrangedSubview(label("工作周：周一至周五 · 建议按额度周期计算",
                                          size: 10, color: .tertiaryLabelColor))
         addDivider()
     }
@@ -242,7 +242,7 @@ final class DashboardViewController: NSViewController {
     @objc private func showMethod() {
         let alert = NSAlert()
         alert.messageText = "统计口径"
-        alert.informativeText = "额度来自本机 Codex app-server。Token 来自本机 Codex 会话日志，只读取 token_count 数值，不读取或上传提示词与回复。今日用量比较今日 00:00 至当前时刻，与此前 7 个自然日同一时段的平均值；少于 3 天不下结论。工作日进度按同一个 7 天额度周期计算，仅排除周六、周日，不包含法定节假日。"
+        alert.informativeText = "额度来自本机 Codex app-server。Token 来自本机 Codex 会话日志，只读取 token_count 数值，不读取或上传提示词与回复。今日用量比较今日 00:00 至当前时刻，与此前 7 个自然日同一时段的平均值；少于 3 天不下结论。本周工作日按自然周一 00:00 至周六 00:00 计算，暂不识别法定节假日和调休；额度建议只比较额度已用和同一额度周期的时间进度。"
         alert.addButton(withTitle: "知道了")
         alert.runModal()
     }

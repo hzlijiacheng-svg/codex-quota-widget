@@ -19,31 +19,28 @@ struct TouchBarQuotaPresentation: Equatable {
 
 enum TouchBarQuotaPresenter {
     static func make(snapshot: ProviderSnapshot?,
-                     now: Date,
-                     calendar: Calendar = .current) -> TouchBarQuotaPresentation? {
+                     now: Date) -> TouchBarQuotaPresentation? {
         guard let snapshot,
               let weekly = snapshot.windows.first(where: { $0.kind == .weekly })
         else { return nil }
 
-        let pace = QuotaPaceCalculator.calculateWorkday(
-            window: weekly, now: now, calendar: calendar
-        )
+        let pace = QuotaPaceCalculator.calculate(window: weekly, now: now)
         let paceText: String
         let paceTone: TouchBarPaceTone
         if let delta = pace?.deltaPercentagePoints {
             let rounded = Int(abs(delta).rounded())
             if rounded >= 2, delta > 0 {
-                paceText = "工作日快 \(rounded)%"
+                paceText = "周期快 \(rounded)%"
                 paceTone = .fast
             } else if rounded >= 2, delta < 0 {
-                paceText = "工作日慢 \(rounded)%"
+                paceText = "周期慢 \(rounded)%"
                 paceTone = .slow
             } else {
-                paceText = "工作日匹配"
+                paceText = "周期匹配"
                 paceTone = .normal
             }
         } else {
-            paceText = "工作日暂无"
+            paceText = "周期暂无"
             paceTone = .unavailable
         }
 

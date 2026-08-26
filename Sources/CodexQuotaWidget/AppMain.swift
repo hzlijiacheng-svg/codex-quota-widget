@@ -10,6 +10,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private lazy var dashboard = DashboardViewController(store: store)
     private var refreshTimer: Timer?
     private var displayTimer: Timer?
+    private var globalClickMonitor: Any?
+    private var localClickMonitor: Any?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let positionKey = "NSStatusItem Preferred Position QuotaStatus"
@@ -42,6 +44,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        stopOutsideClickMonitoring()
         TouchBarController.shared.restorePresentationMode()
     }
 
@@ -56,6 +59,46 @@ final class AppController: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         else {
             dashboard.rebuild()
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+            startOutsideClickMonitoring()
+        }
+    }
+
+    func popoverDidClose(_ notification: Notification) {
+        stopOutsideClickMonitoring()
+    }
+
+    private func startOutsideClickMonitoring() {
+        stopOutsideClickMonitoring()
+        let events: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown]
+        globalClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: events) { [weak self] _ in
+            DispatchQueue.main.async { self?.closePopoverForOutsideClick() }
+        }
+        localClickMonitor = NSEvent.addLocalMonitorForEvents(matching: events) { [weak self] event in
+            guard let self else { return event }
+            let eventWindow = event.window
+            let shouldClose = PopoverDismissalPolicy.shouldClose(
+                isGlobalEvent: false,
+                isPopoverWindow: eventWindow === self.popover.contentViewController?.view.window,
+                isStatusItemWindow: eventWindow === self.statusItem.button?.window
+            )
+            if shouldClose { self.closePopoverForOutsideClick() }
+            return event
+        }
+    }
+
+    private func closePopoverForOutsideClick() {
+        guard popover.isShown else { return }
+        popover.performClose(nil)
+    }
+
+    private func stopOutsideClickMonitoring() {
+        if let globalClickMonitor {
+            NSEvent.removeMonitor(globalClickMonitor)
+            self.globalClickMonitor = nil
+        }
+        if let localClickMonitor {
+            NSEvent.removeMonitor(localClickMonitor)
+            self.localClickMonitor = nil
         }
     }
 
