@@ -11,6 +11,19 @@ private func check(_ condition: @autoclosure () -> Bool, _ name: String) {
     }
 }
 
+let codexExecutableCandidates = CodexExecutableLocator.candidates(
+    environment: [:],
+    homeDirectory: URL(fileURLWithPath: "/Users/tester")
+)
+check(codexExecutableCandidates.contains(
+    "/Applications/ChatGPT.app/Contents/Resources/codex-cli/CodexCLI.app/Contents/MacOS/codex"
+), "Codex locator supports the current bundled ChatGPT CLI path")
+check(CodexExecutableLocator.firstExecutable(
+    environment: ["CODEX_QUOTA_CODEX_PATH": "/custom/codex"],
+    homeDirectory: URL(fileURLWithPath: "/Users/tester"),
+    isExecutable: { $0 == "/custom/codex" }
+) == "/custom/codex", "Codex locator preserves an explicit executable override")
+
 let touchBarPlan = TouchBarPresentationPolicy.select(
     availableSelectors: [
         "presentSystemModalTouchBar:systemTrayItemIdentifier:",

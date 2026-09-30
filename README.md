@@ -2,9 +2,9 @@
 
 macOS 原生菜单栏工具，把 Codex 周额度变成随时可见的“电量表”。无需反复打开命令行：抬眼即可看到剩余额度，点击后还能判断当前消耗是否跑得太快。
 
-[![下载最新版](https://img.shields.io/badge/下载最新版-macOS_通用安装包-7C5CFC?style=for-the-badge&logo=apple)](https://github.com/hzlijiacheng-svg/codex-quota-widget/releases/latest/download/Codex-Weekly-Quota-Menubar-v2.0.2-macOS-universal.zip)
+[![下载最新版](https://img.shields.io/badge/下载最新版-macOS_通用安装包-7C5CFC?style=for-the-badge&logo=apple)](https://github.com/hzlijiacheng-svg/codex-quota-widget/releases/latest/download/Codex-Weekly-Quota-Menubar-v2.0.3-macOS-universal.zip)
 
-**[直接下载 Codex 额度仪表 v2.0.2](https://github.com/hzlijiacheng-svg/codex-quota-widget/releases/latest/download/Codex-Weekly-Quota-Menubar-v2.0.2-macOS-universal.zip)** · [查看全部版本](https://github.com/hzlijiacheng-svg/codex-quota-widget/releases)
+**[直接下载 Codex 额度仪表 v2.0.3](https://github.com/hzlijiacheng-svg/codex-quota-widget/releases/latest/download/Codex-Weekly-Quota-Menubar-v2.0.3-macOS-universal.zip)** · [查看全部版本](https://github.com/hzlijiacheng-svg/codex-quota-widget/releases)
 
 > 支持 macOS 12 及以上、Intel 与 Apple 芯片。当前正式启用 Codex 数据源；GLM/企业 AI 网关仍在适配中。
 

@@ -145,15 +145,11 @@ final class CodexProvider: QuotaProvider {
 
     private static func executableURL() throws -> URL {
         let home = FileManager.default.homeDirectoryForCurrentUser
-        let candidates = [
-            ProcessInfo.processInfo.environment["CODEX_QUOTA_CODEX_PATH"],
-            "/Applications/ChatGPT.app/Contents/Resources/codex",
-            "/Applications/Codex.app/Contents/Resources/codex",
-            home.appendingPathComponent("Applications/ChatGPT.app/Contents/Resources/codex").path,
-            home.appendingPathComponent("Applications/Codex.app/Contents/Resources/codex").path,
-            "/opt/homebrew/bin/codex", "/usr/local/bin/codex"
-        ].compactMap { $0 }
-        guard let path = candidates.first(where: FileManager.default.isExecutableFile) else {
+        guard let path = CodexExecutableLocator.firstExecutable(
+            environment: ProcessInfo.processInfo.environment,
+            homeDirectory: home,
+            isExecutable: FileManager.default.isExecutableFile
+        ) else {
             throw WidgetError.codexNotFound
         }
         return URL(fileURLWithPath: path)
