@@ -4,7 +4,7 @@ import QuotaCore
 #endif
 
 final class AppController: NSObject, NSApplicationDelegate, NSPopoverDelegate {
-    private let statusItem = NSStatusBar.system.statusItem(withLength: 58)
+    private let statusItem = NSStatusBar.system.statusItem(withLength: StatusBarBatteryRenderer.width)
     private let popover = NSPopover()
     private let store = QuotaStore()
     private lazy var dashboard = DashboardViewController(store: store)
@@ -107,53 +107,43 @@ final class AppController: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
     private func renderStatus() {
         let snapshot = store.snapshots[.codex]
-        statusItem.button?.image = Self.statusImage(snapshot: snapshot,
-                                                   hasError: store.errors[.codex] != nil)
+        let gateway = store.snapshots[.zcode]
+        statusItem.button?.image = StatusBarBatteryRenderer.image(
+            codex: snapshot?.windows.first(where: { $0.kind == .weekly })?.remainingPercent,
+            codexHasError: store.errors[.codex] != nil,
+            zcode: gateway?.gatewayQuota?.remainingPercent,
+            zcodeHasError: store.errors[.zcode] != nil
+        )
         statusItem.button?.imagePosition = .imageOnly
-        statusItem.button?.toolTip = snapshot?.tightestWindow.map {
-            "Codex 最紧张额度剩余 \(Int($0.remainingPercent.rounded()))%"
-        } ?? "Codex 额度暂无数据"
+        let codexText = store.errors[.codex] != nil ? "Codex 更新失败" :
+            snapshot?.windows.first(where: { $0.kind == .weekly }).map {
+                "Codex 周额度剩余 \(Int($0.remainingPercent.rounded()))%"
+            } ?? "Codex 额度暂无数据"
+        let gatewayText = store.errors[.zcode] != nil ? "ZCode 网关更新失败" :
+            gateway?.gatewayQuota.map { "ZCode 网关剩余 \(Int($0.remainingPercent.rounded()))%" }
+            ?? "ZCode 网关额度暂无数据"
+        statusItem.button?.toolTip = "\(codexText) · \(gatewayText)"
+        statusItem.button?.setAccessibilityLabel("\(codexText) · \(gatewayText)")
         TouchBarController.shared.update(snapshot: snapshot)
-    }
-
-    private static func statusImage(snapshot: ProviderSnapshot?, hasError: Bool) -> NSImage {
-        let image = NSImage(size: NSSize(width: 56, height: 18), flipped: false) { _ in
-            let windowsByKind = Dictionary(uniqueKeysWithValues:
-                (snapshot?.windows ?? []).map { ($0.kind, $0) })
-            let weekly = windowsByKind[.weekly]
-            NSColor.secondaryLabelColor.withAlphaComponent(0.25).setFill()
-            NSBezierPath(roundedRect: NSRect(x: 0, y: 7, width: 22, height: 5),
-                         xRadius: 2.5, yRadius: 2.5).fill()
-            if let weekly {
-                NSColor.systemPurple.setFill()
-                let width = 22 * CGFloat(weekly.remainingPercent / 100)
-                NSBezierPath(roundedRect: NSRect(x: 0, y: 7, width: width, height: 5),
-                             xRadius: 2.5, yRadius: 2.5).fill()
-            }
-            let text = hasError ? "!%" : weekly.map {
-                "\(Int($0.remainingPercent.rounded()))%"
-            } ?? "--%"
-            (text as NSString).draw(in: NSRect(x: 27, y: 2, width: 29, height: 15),
-                withAttributes: [.font: NSFont.monospacedDigitSystemFont(ofSize: 11.5, weight: .regular),
-                                 .foregroundColor: hasError ? NSColor.systemRed : NSColor.labelColor])
-            return true
-        }
-        image.isTemplate = false
-        return image
     }
 }
 
 @main
 struct WidgetApplication {
     static func main() {
-        if CommandLine.arguments.contains("--print") {
-            for provider: QuotaProvider in [CodexProvider()] {
+        if CommandLine.arguments.contains("--print") || CommandLine.arguments.contains("--print-gateway") {
+            let providers: [QuotaProvider] = CommandLine.arguments.contains("--print-gateway")
+                ? [GatewayProvider()] : [CodexProvider(), GatewayProvider()]
+            for provider in providers {
                 do {
                     let snapshot = try provider.fetch(now: Date())
                     let windows = snapshot.windows.map {
                         "\($0.kind.rawValue)=\(Int($0.remainingPercent.rounded()))%"
                     }.joined(separator: ",")
-                    print("provider=\(provider.id.rawValue) plan=\(snapshot.planName ?? "unknown") \(windows)")
+                    let gateway = snapshot.gatewayQuota.map {
+                        "period=\($0.period) used=\($0.used) limit=\($0.limit)"
+                    } ?? ""
+                    print("provider=\(provider.id.rawValue) plan=\(snapshot.planName ?? "unknown") \(windows) \(gateway)")
                 } catch {
                     print("provider=\(provider.id.rawValue) error=\(error.localizedDescription)")
                 }

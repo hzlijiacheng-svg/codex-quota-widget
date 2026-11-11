@@ -1,119 +1,58 @@
-# Codex 额度仪表
+# 额度与节奏
 
-macOS 原生菜单栏工具，把 Codex 周额度变成随时可见的“电量表”。无需反复打开命令行：抬眼即可看到剩余额度，点击后还能判断当前消耗是否跑得太快。
+macOS 菜单栏工具，查看 Codex 周额度和 ZCode 所用企业 AI 网关的额度，并按工作日了解使用节奏。源码版本为 2.1.0；已有的公开安装包仍是 2.0.3，需从源码构建才能使用此版本的新功能。
 
-[![下载最新版](https://img.shields.io/badge/下载最新版-macOS_通用安装包-7C5CFC?style=for-the-badge&logo=apple)](https://github.com/hzlijiacheng-svg/codex-quota-widget/releases/latest/download/Codex-Weekly-Quota-Menubar-v2.0.3-macOS-universal.zip)
+## 界面
 
-**[直接下载 Codex 额度仪表 v2.0.3](https://github.com/hzlijiacheng-svg/codex-quota-widget/releases/latest/download/Codex-Weekly-Quota-Menubar-v2.0.3-macOS-universal.zip)** · [查看全部版本](https://github.com/hzlijiacheng-svg/codex-quota-widget/releases)
+![Codex 额度与工作日速度示意](docs/images/quota-dashboard-v2.1-codex.png)
 
-> 支持 macOS 12 及以上、Intel 与 Apple 芯片。当前正式启用 Codex 数据源；GLM/企业 AI 网关仍在适配中。
+![ZCode 企业网关日额度示意](docs/images/quota-dashboard-v2.1-zcode.png)
 
-## 界面预览
+截图使用示意数据。菜单栏同时显示 Codex 周额度和企业网关额度；点击面板上的来源卡片切换详情。额度每 5 分钟刷新，也可手动刷新；更新失败时显示错误和上次成功读取的时间。
 
-| 点击面板 | Touch Bar |
-| --- | --- |
-| <img src="docs/images/quota-dashboard.png" width="360" alt="Codex 额度仪表点击面板"> | <img src="docs/images/touch-bar.png" width="720" alt="Codex 额度仪表 Touch Bar 展示"> |
+## 工作日速度
 
-## 产品功能
+- 每个额度周期都按自身起止时间计算，周一至周五全天计入，周六、周日不计入。目前不识别法定节假日和调休。
+- **平均速度** = 周期内已用额度比例 ÷ 周期内已过工作日比例。1.00× 表示按工作日均匀用完整个周期额度；低于 0.80× 显示偏慢，高于 1.20× 显示偏快，之间显示平稳。
+- 周期刚开始、已过工作日比例不足 5% 时，速度显示为待观察。Codex 还显示剩余工作日和每工作日平均可用额度；周期内没有剩余工作日时不计算每日可用量。
+- 网关规则为按本地自然日重置的日额度时，工作日显示当天平均速度。其他周期或无法核验的重置时间只显示实际额度，不估算日速度。
+- Codex 今日 Token 统计仍来自本机会话日志；有足够历史数据时比较最近自然日的相同时段，并显示输入、缓存和输出明细。
 
-### 菜单栏：周额度一眼可见
+## 企业网关配置
 
-- 只显示一条周额度血条和带 `%` 的剩余额度，省去含义重复的 `7d`。
-- 低占用设计，兼顾旧款 Mac 较窄的菜单栏空间。
-- 每 5 分钟自动刷新，也可从面板立即刷新。
+ZCode 显示的是配置文件中指定的**网关消费者和单条额度规则**，统计范围取决于该消费者，可能包含使用同一消费者的其他客户端。额度、已用 Token、重置时间和规则周期均来自阿里云 APIG 管理接口；ZCode 的模型 API Key 本身不用于查询管理接口。
 
-### 三环节奏：告诉你该不该省
+按顺序查找配置目录：
 
-点击菜单栏图标后，三个环形进度会同时展示：
+1. `CODEX_QUOTA_APIG_DIR` 指定的目录；
+2. `~/.config/codex-quota-widget/apig/`；
+3. 本机已有的 `~/Documents/code/codex-quota-widget/.local-apig/`。
 
-- **额度周期已过**：当前 Codex 7 天额度周期已经过去多少。
-- **本周工作日**：自然周一至周五已经过去多少，与额度重置日无关。
-- **额度已用**：Codex 周额度已经消耗多少。
+目录中的 `gateway-config.json` 应包含 `endpoint`、`gatewayId`、`quotaRuleId` 和 `subjectId`。凭据可使用现有 `.local-apig/` 的配置方式：本机权限为 `600` 的 `credentials.local.json`，或 macOS 钥匙串服务 `local.codex-quota-widget.apig` 中的 `access-key-id`、`access-key-secret` 和可选的 `security-token`。优先读取该目录下的本地凭据文件。不要将真实凭据、资源标识或个人配置提交到仓库。
 
-工具会比较同一起止区间的“额度已用”和“额度周期已过”，输出“建议稍微省一点”“建议大幅节省”“小额富余”或“大额富余”，避免错拿自然工作周与不同起点的额度周期比较。本周工作日按周一 00:00 至周六 00:00 计算，暂不识别法定节假日和调休。
+网关查询仅允许固定的杭州 APIG HTTPS 管理域名，只调用配置规则的只读查询接口，拒绝重定向，并在系统代理连接失败时尝试直连。接口失败不会用零值代替未知用量。接口字段见[阿里云 APIG 用量接口说明](https://help.aliyun.com/zh/api-gateway/ai-gateway/developer-reference/api-apig-2024-03-27-getgatewayquotarulesubjectusage)。
 
-### 重置时间与额度窗口
+## 安装与运行
 
-- 展示 Codex 返回的全部可用额度窗口。
-- 周额度、剩余百分比和重置倒计时保持在同一行。
-- 重置时间使用更醒目的颜色，减少扫读成本。
+需要 macOS 12 及以上，以及已登录的 Codex 桌面端或 CLI。ZCode 网关额度需要上述只读配置。
 
-### Token 消耗看板
-
-- 统计今日 Token 总量，并拆分为输入、缓存输入和输出。
-- 比较“今天截至当前时刻”和“此前 7 个自然日相同时段”的平均值。
-- 同时展示绝对 Token 差值与相对百分比；历史样本少于 3 天时不武断判断快慢。
-- 首次启动在后台扫描最近 8 天日志，后续只读取新增内容。
-
-### Touch Bar 常驻仪表
-
-在带 Touch Bar 的 Mac 上显示细长的周额度仪表：
-
-- 明确标注“Codex 周额度”，不使用含义不明的单字母。
-- 展示长血条、剩余百分比、已用百分比、重置倒计时和额度周期节奏。
-- 左侧显示额度，右侧继续保留亮度、音量等系统控制。
-- 应用退出或卸载后，恢复启动前的 Touch Bar 显示模式。
-
-### 自动适配代理与直连
-
-不同电脑无需准备配置文件。读取额度时按以下顺序自动尝试：
-
-1. `HTTP_PROXY` / `HTTPS_PROXY` 等进程环境代理；
-2. macOS 当前系统代理；
-3. 无代理直连。
-
-某条链路失败后才切换下一条。支持常见固定地址 HTTP/HTTPS/SOCKS 代理；PAC 自动代理脚本及需要额外认证的企业代理暂未自动解析。
-
-## 安装
-
-1. 从页面顶部下载最新版并解压。
-2. 双击 `安装.command`。
-3. 如果 macOS 提示无法验证开发者，右键点击安装文件，选择“打开”。
-4. 安装完成后，菜单栏会立即出现额度血条；以后登录 macOS 时自动启动。
-
-前提：电脑已安装并登录 ChatGPT/Codex 桌面端，或已登录 Codex CLI。
-
-## 卸载
-
-双击安装包中的 `卸载.command`。应用和登录启动项会移到废纸篓，Touch Bar 会恢复原来的显示模式。
-
-## 数据与隐私
-
-- 额度通过本机 Codex `app-server` 读取，不读取或保存账号令牌。
-- Token 统计只解析 `~/.codex/sessions` 中的 `token_count` 数值。
-- 不解析提示词、回复或代码正文，也不会把统计数据上传到第三方。
-- “打开日志目录”只会在 Finder 中打开目录，不会修改日志。
-- 数据不可核验时明确显示暂无数据或错误，不编造额度。
-
-Codex 本地接口属于实验性接口。未来 Codex 升级后若字段发生变化，本项目可能需要同步更新。
-
-## 从源码运行
+应用及安装脚本面向 macOS；目前没有 Windows 版系统托盘和安装程序，不能直接在 Windows 运行。
 
 ```bash
-git clone https://github.com/hzlijiacheng-svg/codex-quota-widget.git
-cd codex-quota-widget
 ./test.command
+./build.command
 ./run.command
 ```
 
-常用命令：
+`./install.command` 会构建并安装到 `~/Applications/CodexQuotaWidget.app`，并配置用户登录启动。`./package.command` 可生成 Intel + Apple 芯片通用分享包。
 
-| 命令 | 用途 |
-| --- | --- |
-| `./test.command` | 运行额度节奏、Token 统计、代理回退和 Touch Bar 测试 |
-| `./build.command` | 构建 macOS 应用 |
-| `./run.command` | 构建并启动菜单栏应用 |
-| `./install.command` | 安装到当前用户目录并配置登录启动 |
-| `./package.command` | 生成 Intel + Apple 芯片通用分享包 |
-| `.build/CodexQuotaWidget.app/Contents/MacOS/CodexQuotaWidget --print` | 只读取并打印当前额度 |
+```bash
+# 在终端检查当前两个来源
+.build/CodexQuotaWidget.app/Contents/MacOS/CodexQuotaWidget --print
+# 仅检查所配置的企业网关
+.build/CodexQuotaWidget.app/Contents/MacOS/CodexQuotaWidget --print-gateway
+```
 
-## 数据来源与兼容边界
+Codex 额度通过本机 `app-server` 读取；Token 统计只解析会话日志中的 `token_count` 数值，不读取提示词或回复。带 Touch Bar 的 Mac 继续显示 Codex 周额度及工作日平均速度。
 
-- Codex 可执行文件依次从 `CODEX_QUOTA_CODEX_PATH`、ChatGPT/Codex 应用内置位置和 Homebrew 常见目录发现。
-- 展示的是 Codex 账户额度，不等同于 ChatGPT 网页版各模型的消息次数上限。
-- 当前运行版本只启用 Codex。GLM Coding Plan 与企业网关代码仍处于适配阶段，不作为正式能力宣传。
-- 没有 Touch Bar 的 Mac 会自动忽略 Touch Bar 功能，不影响菜单栏与点击面板。
-
-## 反馈与贡献
-
-遇到额度读取、菜单栏显示或 Touch Bar 兼容问题，请提交 [Issue](https://github.com/hzlijiacheng-svg/codex-quota-widget/issues)，并附上 macOS 版本、安装方式和脱敏后的错误信息。请勿上传 API Key、Cookie、AccessKey 或公司内部网关地址。
+2.0.3 公开包的下载地址仍在 [GitHub Releases](https://github.com/hzlijiacheng-svg/codex-quota-widget/releases)；该包不包含 2.1.0 的改动。

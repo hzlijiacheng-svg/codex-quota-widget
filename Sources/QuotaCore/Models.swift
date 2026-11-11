@@ -3,11 +3,13 @@ import Foundation
 public enum ProviderID: String, CaseIterable, Codable {
     case codex
     case glm
+    case zcode
 
     public var displayName: String {
         switch self {
         case .codex: return "Codex"
         case .glm: return "GLM"
+        case .zcode: return "ZCode"
         }
     }
 }
@@ -83,12 +85,39 @@ public struct QuotaPace: Equatable {
     public let deltaPercentagePoints: Double
 }
 
+public struct WorkdayBudget: Equatable {
+    public let elapsedPercent: Double
+    public let usedPercent: Double
+    public let elapsedWorkdays: Double
+    public let remainingWorkdays: Double
+    /// Average use divided by the even-use target; 1 means on target.
+    public let speedIndex: Double?
+    /// Percentage points of the full quota available per remaining workday.
+    public let dailyBudgetPercent: Double?
+}
+
+public struct GatewayQuota: Equatable {
+    public let name: String
+    public let period: String
+    public let alignment: String?
+    public let used: Int64
+    public let limit: Int64
+    public let input: Int64?
+    public let output: Int64?
+    public let cached: Int64?
+    public let resetAt: Date?
+
+    public var remaining: Int64 { max(0, limit - used) }
+    public var remainingPercent: Double { Double(remaining) / Double(limit) * 100 }
+}
+
 public struct ProviderSnapshot: Equatable {
     public let provider: ProviderID
     public let planName: String?
     public let windows: [QuotaWindow]
     public let tokenBreakdown: TokenBreakdown?
     public let tokenPace: TokenPace?
+    public let gatewayQuota: GatewayQuota?
     public let updatedAt: Date
     public let sourceDescription: String
 
@@ -98,6 +127,7 @@ public struct ProviderSnapshot: Equatable {
         windows: [QuotaWindow],
         tokenBreakdown: TokenBreakdown? = nil,
         tokenPace: TokenPace? = nil,
+        gatewayQuota: GatewayQuota? = nil,
         updatedAt: Date,
         sourceDescription: String
     ) {
@@ -106,6 +136,7 @@ public struct ProviderSnapshot: Equatable {
         self.windows = windows
         self.tokenBreakdown = tokenBreakdown
         self.tokenPace = tokenPace
+        self.gatewayQuota = gatewayQuota
         self.updatedAt = updatedAt
         self.sourceDescription = sourceDescription
     }

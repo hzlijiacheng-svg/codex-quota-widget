@@ -33,7 +33,7 @@ agent_tmp="$(mktemp "$launch_agents_dir/local.codex.quota-widget.XXXXXX.plist")"
 /bin/launchctl kickstart -k "gui/$user_id/local.codex.quota-widget"
 
 echo
-echo "安装完成：顶部菜单栏会显示 Codex 周额度。"
+echo "安装完成：顶部菜单栏会显示额度电池。"
 echo "以后登录 macOS 时会自动启动。"
 echo
 echo "如果图标被其他菜单栏项目挤掉，请先切换到 Finder，再按住 Command 拖动额度图标到右侧。"

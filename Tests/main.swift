@@ -127,13 +127,14 @@ let touchBarPresentation = TouchBarQuotaPresenter.make(
         updatedAt: touchBarNow,
         sourceDescription: "test"
     ),
-    now: touchBarNow
+    now: touchBarNow,
+    calendar: touchBarCalendar
 )
 check(touchBarPresentation?.title == "Codex 周额度", "Touch Bar uses an explicit title")
 check(touchBarPresentation?.remaining == "79%", "Touch Bar emphasizes remaining quota")
 check(touchBarPresentation?.used == "已用 21%", "Touch Bar explains current usage")
 check(touchBarPresentation?.reset == "5天12小时后重置", "Touch Bar explains the reset cycle")
-check(touchBarPresentation?.pace == "周期匹配", "Touch Bar compares quota with its own cycle")
+check(touchBarPresentation?.pace == "偏慢 0.70×", "Touch Bar uses the same workday speed as the dashboard")
 
 var workdayCalendar = Calendar(identifier: .gregorian)
 workdayCalendar.timeZone = TimeZone(secondsFromGMT: 0)!
@@ -160,6 +161,50 @@ check(abs((workdayPace?.elapsedPercent ?? 0) - 50) < 0.001,
       "Workday pace excludes Saturday and Sunday")
 check(abs((workdayPace?.deltaPercentagePoints ?? 0) - 10) < 0.001,
       "Workday pace compares quota usage with weekday progress")
+let workdayBudget = QuotaPaceCalculator.workdayBudget(
+    window: workdayWindow, now: workdayNow, calendar: workdayCalendar
+)
+check(abs((workdayBudget?.elapsedWorkdays ?? 0) - 2.5) < 0.001,
+      "Budget counts elapsed workdays within the actual quota cycle")
+check(abs((workdayBudget?.remainingWorkdays ?? 0) - 2.5) < 0.001,
+      "Budget excludes weekend from the remaining workdays")
+check(abs((workdayBudget?.speedIndex ?? 0) - 1.2) < 0.001,
+      "Speed compares average consumption with an even workday budget")
+check(abs((workdayBudget?.dailyBudgetPercent ?? 0) - 16) < 0.001,
+      "Daily budget divides remaining quota over remaining workdays")
+check(WorkdaySpeed.classify(0.79) == .slow, "Speed below the target range is slow")
+check(WorkdaySpeed.classify(1.0) == .balanced, "Speed matching the target is balanced")
+check(WorkdaySpeed.classify(1.21) == .fast, "Speed above the target range is fast")
+check(WorkdaySpeed.classify(0.799) == .balanced && WorkdaySpeed.classify(1.204) == .balanced,
+      "Speed labels agree with the displayed two-decimal ratio")
+let justStarted = QuotaPaceCalculator.workdayBudget(
+    window: workdayWindow, now: workdayStart.addingTimeInterval(3600),
+    calendar: workdayCalendar
+)
+check(justStarted?.speedIndex == nil, "Speed waits for enough elapsed work time")
+let weekendBudget = QuotaPaceCalculator.workdayBudget(
+    window: workdayWindow,
+    now: workdayCalendar.date(from: DateComponents(year: 2026, month: 8, day: 29, hour: 12))!,
+    calendar: workdayCalendar
+)
+check(abs((weekendBudget?.elapsedPercent ?? 0) - 100) < 0.001,
+      "Weekend does not advance the quota's workday clock")
+check(weekendBudget?.dailyBudgetPercent == nil,
+      "Daily budget is unavailable when no workdays remain before reset")
+let partialWindow = QuotaWindow(
+    kind: .weekly, usedPercent: 40,
+    resetAt: workdayCalendar.date(from: DateComponents(year: 2026, month: 9, day: 1, hour: 12))!,
+    durationSeconds: 7 * 24 * 60 * 60, resetMode: .fixedCycle
+)
+let partialBudget = QuotaPaceCalculator.workdayBudget(
+    window: partialWindow,
+    now: workdayCalendar.date(from: DateComponents(year: 2026, month: 8, day: 31, hour: 12))!,
+    calendar: workdayCalendar
+)
+check(abs((partialBudget?.elapsedWorkdays ?? 0) - 4) < 0.001,
+      "Cycles starting midday retain the partial first workday")
+check(abs((partialBudget?.remainingWorkdays ?? 0) - 1) < 0.001,
+      "Cycles resetting midday retain the partial final workday")
 let calendarWorkweekWednesday = QuotaPaceCalculator.calendarWorkweekElapsedPercent(
     now: workdayNow, calendar: workdayCalendar
 )
@@ -288,6 +333,71 @@ do {
 } catch {
     failures += 1
     fputs("FAIL GLM parser: \(error)\n", stderr)
+}
+
+let gatewayRule: [String: Any] = [
+    "ruleName": "configured rule", "ruleStatus": "enabled", "quotaDimension": "token",
+    "periodType": "day", "windowAlignment": "calendar",
+    "currentCycleResetAt": "2026-11-12T00:00:00+08:00"
+]
+do {
+    let gateway = try GatewayQuotaParser.parse(
+        rule: gatewayRule,
+        usage: ["totalQuota": 350_000_000, "usedAmount": 70_000_000,
+                "inputAmount": 60_000_000, "outputAmount": 10_000_000]
+    )
+    check(gateway.period == "day", "Gateway preserves the actual daily period")
+    check(gateway.remaining == 280_000_000 && abs(gateway.remainingPercent - 80) < 0.001,
+          "Gateway computes remaining quota from the server's total and used amounts")
+    check(gateway.resetAt != nil, "Gateway parses the server-provided reset time")
+    check(gateway.cached == nil, "Missing gateway token breakdown remains unknown")
+    do {
+        _ = try GatewayQuotaParser.parse(rule: gatewayRule, usage: ["totalQuota": 350_000_000])
+        check(false, "Gateway must reject a response with no used amount")
+    } catch {
+        check(true, "Gateway rejects a response with no used amount")
+    }
+} catch {
+    failures += 1
+    fputs("FAIL Gateway parser: \(error)\n", stderr)
+}
+
+do {
+    let request = try APIGRequestSigner.request(
+        endpoint: "apig.cn-hangzhou.aliyuncs.com", accessKeyID: "test-id",
+        accessKeySecret: "test-secret", securityToken: nil,
+        action: "GetGatewayQuotaRule", path: "/v1/gateways/gw-test/quota-rules/qr-test",
+        query: ["withSubjects": "true"], date: "2026-11-11T06:00:00Z",
+        nonce: "0123456789abcdef0123456789abcdef"
+    )
+    let expected = "ACS3-HMAC-SHA256 Credential=test-id,SignedHeaders=host;x-acs-action;x-acs-content-sha256;x-acs-date;x-acs-signature-nonce;x-acs-version,Signature=65518a9d60131189ae79bd3df835cada1772bbc57a3c75e8f7e43895fd704e66"
+    check(request.value(forHTTPHeaderField: "Authorization") == expected,
+          "Gateway request signature matches the independently generated ACS3 vector")
+    check(request.url?.scheme == "https", "Gateway requests use HTTPS")
+    do {
+        _ = try APIGRequestSigner.request(
+            endpoint: "example.invalid", accessKeyID: "test-id", accessKeySecret: "test-secret",
+            securityToken: nil, action: "GetGatewayQuotaRule",
+            path: "/v1/gateways/gw-test/quota-rules/qr-test", date: "2026-11-11T06:00:00Z", nonce: "test"
+        )
+        check(false, "Gateway signer must reject an unapproved host")
+    } catch {
+        check(true, "Gateway signer rejects an unapproved host")
+    }
+    do {
+        _ = try APIGRequestSigner.request(
+            endpoint: "apig.cn-hangzhou.aliyuncs.com", accessKeyID: "test-id", accessKeySecret: "test-secret",
+            securityToken: nil, action: "GetGatewayQuotaRule",
+            path: "/v1/gateways/gw-test/quota-rules/qr-test/subjects/cs-test/usage",
+            date: "2026-11-11T06:00:00Z", nonce: "test"
+        )
+        check(false, "Gateway signer must reject an action and path mismatch")
+    } catch {
+        check(true, "Gateway signer rejects an action and path mismatch")
+    }
+} catch {
+    failures += 1
+    fputs("FAIL Gateway signature: \(error)\n", stderr)
 }
 
 if failures > 0 {

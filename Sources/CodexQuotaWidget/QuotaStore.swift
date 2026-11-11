@@ -4,9 +4,7 @@ import QuotaCore
 #endif
 
 final class QuotaStore {
-    // GLM/company-gateway support stays compiled but is not enabled until the
-    // management API and authentication contract are confirmed by operations.
-    private let providers: [QuotaProvider] = [CodexProvider()]
+    private let providers: [QuotaProvider] = [CodexProvider(), GatewayProvider()]
     private(set) var snapshots: [ProviderID: ProviderSnapshot] = [:]
     private(set) var errors: [ProviderID: String] = [:]
     private(set) var isLoadingTokens = false
@@ -17,28 +15,34 @@ final class QuotaStore {
         guard !isRefreshing else { return }
         isRefreshing = true
         let group = DispatchGroup()
-        let lock = NSLock()
-        var nextSnapshots: [ProviderID: ProviderSnapshot] = [:]
-        var nextErrors: [ProviderID: String] = [:]
         for provider in providers {
             group.enter()
             DispatchQueue.global(qos: .utility).async {
-                defer { group.leave() }
+                let result: Result<ProviderSnapshot, Error>
                 do {
-                    let snapshot = try provider.fetch(now: Date())
-                    lock.lock(); nextSnapshots[provider.id] = snapshot; lock.unlock()
+                    result = .success(try provider.fetch(now: Date()))
                 } catch {
-                    lock.lock(); nextErrors[provider.id] = error.localizedDescription; lock.unlock()
+                    result = .failure(error)
+                }
+                DispatchQueue.main.async { [weak self] in
+                    defer { group.leave() }
+                    guard let self else { return }
+                    switch result {
+                    case .success(let snapshot):
+                        self.snapshots[provider.id] = snapshot
+                        self.errors.removeValue(forKey: provider.id)
+                        if provider.id == .codex { self.refreshCodexTokens() }
+                    case .failure(let error):
+                        self.errors[provider.id] = error.localizedDescription
+                    }
+                    self.onChange?()
                 }
             }
         }
         group.notify(queue: .main) { [weak self] in
             guard let self else { return }
             self.isRefreshing = false
-            self.snapshots.merge(nextSnapshots) { _, new in new }
-            self.errors = nextErrors
             self.onChange?()
-            self.refreshCodexTokens()
         }
     }
 

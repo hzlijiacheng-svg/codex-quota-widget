@@ -1,5 +1,22 @@
 import AppKit
 
+enum DashboardPalette {
+    static let codex = adaptive(light: NSColor(calibratedRed: 0.43, green: 0.16, blue: 0.60, alpha: 1),
+                                dark: .systemPurple)
+    static let gateway = adaptive(light: NSColor(calibratedRed: 0.00, green: 0.39, blue: 0.45, alpha: 1),
+                                  dark: .systemTeal)
+    static let balanced = adaptive(light: NSColor(calibratedRed: 0.04, green: 0.39, blue: 0.13, alpha: 1),
+                                   dark: .systemGreen)
+    static let warning = adaptive(light: NSColor(calibratedRed: 0.57, green: 0.26, blue: 0.00, alpha: 1),
+                                  dark: .systemOrange)
+
+    private static func adaptive(light: NSColor, dark: NSColor) -> NSColor {
+        NSColor(name: nil) { appearance in
+            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light
+        }
+    }
+}
+
 final class LevelBar: NSView {
     var percent: Double = 0 { didSet { needsDisplay = true } }
     var tint: NSColor = .systemBlue { didSet { needsDisplay = true } }
@@ -8,7 +25,7 @@ final class LevelBar: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         let track = NSBezierPath(roundedRect: bounds, xRadius: 5, yRadius: 5)
-        NSColor.white.withAlphaComponent(0.10).setFill(); track.fill()
+        NSColor.labelColor.withAlphaComponent(0.12).setFill(); track.fill()
         let width = bounds.width * CGFloat(min(100, max(0, percent))) / 100
         guard width > 0 else { return }
         tint.setFill()
