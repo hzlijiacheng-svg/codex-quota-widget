@@ -17,6 +17,14 @@ public struct CodexTokenEvent: Equatable {
 }
 
 public enum CodexTokenEventParser {
+    private static let timestampLock = NSLock()
+    private static let fractionalDate: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+    private static let standardDate = ISO8601DateFormatter()
+
     public static func parse(data: Data) throws -> CodexTokenEvent {
         guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
               let timestampText = object["timestamp"] as? String,
@@ -45,10 +53,9 @@ public enum CodexTokenEventParser {
     }
 
     private static func timestamp(_ value: String) -> Date? {
-        let fractional = ISO8601DateFormatter()
-        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = fractional.date(from: value) { return date }
-        return ISO8601DateFormatter().date(from: value)
+        timestampLock.lock()
+        defer { timestampLock.unlock() }
+        return fractionalDate.date(from: value) ?? standardDate.date(from: value)
     }
 
     private static func int64(_ value: Any?) -> Int64 {

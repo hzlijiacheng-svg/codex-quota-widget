@@ -110,26 +110,22 @@ public enum QuotaPaceCalculator {
               let saturday = calendar.date(byAdding: .day, value: 5, to: monday)
         else { return 0 }
         let clampedNow = min(saturday, max(monday, now))
-        let duration = saturday.timeIntervalSince(monday)
-        guard duration > 0 else { return 0 }
-        return min(100, max(0, clampedNow.timeIntervalSince(monday) / duration * 100))
+        let total = workdays(from: monday, to: saturday, calendar: calendar)
+        guard total > 0 else { return 0 }
+        return min(100, max(0, workdays(from: monday, to: clampedNow, calendar: calendar) / total * 100))
     }
 
-    private static func workdays(from startAt: Date,
-                                 to endAt: Date,
-                                 calendar: Calendar) -> Double {
+    static func workdays(from startAt: Date,
+                         to endAt: Date,
+                         calendar: Calendar = .current) -> Double {
         guard endAt > startAt else { return 0 }
         var cursor = startAt
         var total: TimeInterval = 0
         while cursor < endAt {
-            let startOfDay = calendar.startOfDay(for: cursor)
-            guard let nextDay = calendar.date(byAdding: .day, value: 1, to: startOfDay)
-            else { break }
-            let segmentEnd = min(nextDay, endAt)
-            let weekday = calendar.component(.weekday, from: cursor)
-            if (2...6).contains(weekday) {
-                let dayLength = nextDay.timeIntervalSince(startOfDay)
-                if dayLength > 0 { total += segmentEnd.timeIntervalSince(cursor) / dayLength }
+            guard let day = calendar.dateInterval(of: .day, for: cursor), day.end > cursor else { break }
+            let segmentEnd = min(day.end, endAt)
+            if (2...6).contains(calendar.component(.weekday, from: cursor)) {
+                total += segmentEnd.timeIntervalSince(cursor) / day.duration
             }
             cursor = segmentEnd
         }

@@ -67,7 +67,11 @@ final class GatewayProvider: QuotaProvider {
         let quota = try GatewayQuotaParser.parse(rule: rule, usage: usage)
         return ProviderSnapshot(provider: .zcode, planName: nil, windows: [],
                                 gatewayQuota: quota, updatedAt: now,
-                                sourceDescription: "企业网关所配置的消费者与规则")
+                                sourceDescription: "企业网关所配置的消费者与规则",
+                                historyIdentity: HistoryIdentity.hash([
+                                    "zcode", config.endpoint, config.gatewayId, config.quotaRuleId,
+                                    config.subjectId, String(quota.limit)
+                                ]))
     }
 
     private static func configDirectory() throws -> URL {

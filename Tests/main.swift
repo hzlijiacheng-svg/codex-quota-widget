@@ -158,7 +158,7 @@ let workdayPace = QuotaPaceCalculator.calculateWorkday(
     window: workdayWindow, now: workdayNow, calendar: workdayCalendar
 )
 check(abs((workdayPace?.elapsedPercent ?? 0) - 50) < 0.001,
-      "Workday pace excludes Saturday and Sunday")
+      "Workday pace counts only full local weekdays")
 check(abs((workdayPace?.deltaPercentagePoints ?? 0) - 10) < 0.001,
       "Workday pace compares quota usage with weekday progress")
 let workdayBudget = QuotaPaceCalculator.workdayBudget(
@@ -209,7 +209,7 @@ let calendarWorkweekWednesday = QuotaPaceCalculator.calendarWorkweekElapsedPerce
     now: workdayNow, calendar: workdayCalendar
 )
 check(abs(calendarWorkweekWednesday - 50) < 0.001,
-      "Calendar workweek is halfway through on Wednesday noon")
+      "Calendar workweek uses working hours on Wednesday noon")
 let calendarWorkweekSunday = QuotaPaceCalculator.calendarWorkweekElapsedPercent(
     now: workdayCalendar.date(from: DateComponents(
         year: 2026, month: 8, day: 30, hour: 12
@@ -218,6 +218,217 @@ let calendarWorkweekSunday = QuotaPaceCalculator.calendarWorkweekElapsedPercent(
 )
 check(abs(calendarWorkweekSunday - 100) < 0.001,
       "Calendar workweek remains complete during the weekend")
+func weekdayDate(_ day: Int, _ hour: Int, _ minute: Int = 0) -> Date {
+    workdayCalendar.date(from: DateComponents(year: 2026, month: 8, day: day,
+                                              hour: hour, minute: minute))!
+}
+func progressAt(_ date: Date) -> Double {
+    QuotaPaceCalculator.workdayBudget(window: workdayWindow, now: date,
+                                      calendar: workdayCalendar)?.elapsedPercent ?? -1
+}
+check(progressAt(weekdayDate(24, 0)) == 0 && abs(progressAt(weekdayDate(24, 6)) - 5) < 0.001,
+      "Weekday progress begins at local midnight")
+check(abs(progressAt(weekdayDate(24, 12)) - 10) < 0.001 &&
+      abs(progressAt(weekdayDate(24, 21)) - 17.5) < 0.001,
+      "Weekday progress advances through lunch and the evening")
+check(abs(progressAt(weekdayDate(29, 12)) - progressAt(weekdayDate(30, 12))) < 0.001,
+      "Weekends do not add working time")
+var shanghaiCalendar = workdayCalendar
+shanghaiCalendar.timeZone = TimeZone(identifier: "Asia/Shanghai")!
+let shanghaiMonday = shanghaiCalendar.date(from: DateComponents(year: 2026, month: 8, day: 24, hour: 10, minute: 30))!
+let shanghaiReset = shanghaiCalendar.date(from: DateComponents(year: 2026, month: 8, day: 31))!
+let shanghaiWindow = QuotaWindow(kind: .weekly, usedPercent: 0, resetAt: shanghaiReset,
+                                 durationSeconds: 7 * 86_400, resetMode: .fixedCycle)
+let shanghaiBudget = QuotaPaceCalculator.workdayBudget(window: shanghaiWindow,
+                                                        now: shanghaiMonday, calendar: shanghaiCalendar)
+check(abs((shanghaiBudget?.elapsedWorkdays ?? 0) - 0.4375) < 0.001,
+      "Working hours use the supplied local timezone")
+
+let trendWindow = QuotaWindow(kind: .weekly, usedPercent: 20, resetAt: workdayEnd,
+                              durationSeconds: workdayEnd.timeIntervalSince(workdayStart),
+                              resetMode: .fixedCycle)
+let evenBudget = QuotaTrendCalculator.evenBudgetLine(window: trendWindow, calendar: workdayCalendar) ?? []
+func baselineValue(_ date: Date) -> Double? {
+    QuotaTrendCalculator.remainingPercent(at: date, along: evenBudget)
+}
+check(evenBudget.first?.at == workdayStart && evenBudget.first?.remainingPercent == 100 &&
+      evenBudget.last?.at == workdayEnd && evenBudget.last?.remainingPercent == 0,
+      "Even budget covers the entire quota cycle from 100 percent to zero")
+check(abs((baselineValue(weekdayDate(25, 0)) ?? -1) - 80) < 0.001 &&
+      abs((baselineValue(weekdayDate(25, 6)) ?? -1) - 75) < 0.001,
+      "Even budget advances through weekday nights")
+check(baselineValue(weekdayDate(29, 0)) == 0 && baselineValue(weekdayDate(30, 12)) == 0,
+      "Even budget remains flat throughout the weekend")
+let sameCycleDifferentUsage = QuotaTrendCalculator.evenBudgetLine(window: workdayWindow, calendar: workdayCalendar)
+check(sameCycleDifferentUsage == evenBudget,
+      "Even budget is independent of actual consumption")
+let personalStart = shanghaiCalendar.date(from: DateComponents(year: 2026, month: 11, day: 16, hour: 10, minute: 41))!
+let personalReset = shanghaiCalendar.date(from: DateComponents(year: 2026, month: 11, day: 23, hour: 10, minute: 41))!
+let personalWindow = QuotaWindow(kind: .weekly, usedPercent: 42, resetAt: personalReset,
+                                 durationSeconds: personalReset.timeIntervalSince(personalStart),
+                                 resetMode: .fixedCycle)
+let personalBudget = QuotaTrendCalculator.evenBudgetLine(window: personalWindow, calendar: shanghaiCalendar) ?? []
+func november(_ day: Int, _ hour: Int, _ minute: Int = 0) -> Date {
+    shanghaiCalendar.date(from: DateComponents(year: 2026, month: 11, day: day, hour: hour, minute: minute))!
+}
+func personalBaseline(_ date: Date) -> Double {
+    QuotaTrendCalculator.remainingPercent(at: date, along: personalBudget) ?? -1
+}
+check(abs(personalBaseline(november(17, 0)) - 88.902778) < 0.001 &&
+      abs(personalBaseline(november(19, 16)) - 35.569444) < 0.001,
+      "A local mid-day cycle advances through the night and preserves partial weekdays")
+check(abs(personalBaseline(november(21, 0)) - 8.902778) < 0.001 &&
+      personalBaseline(november(21, 0)) == personalBaseline(november(23, 0)) &&
+      personalBaseline(personalReset) == 0,
+      "The budget is level all weekend and resumes Monday at midnight")
+let weekendReadings = [QuotaTrendPoint(at: november(21, 0), remainingPercent: 24),
+                       QuotaTrendPoint(at: november(22, 22), remainingPercent: 17)]
+let weekendDifferences = QuotaTrendCalculator.budgetBands(actual: weekendReadings, baseline: personalBudget)
+check(weekendDifferences.first?.start.actual == 24 && weekendDifferences.last?.end.actual == 17 &&
+      weekendDifferences.first?.start.budget == weekendDifferences.last?.end.budget &&
+      abs((weekendDifferences.first?.start.difference ?? 0) -
+          (weekendDifferences.last?.end.difference ?? 0) - 7) < 0.001,
+      "Weekend usage changes both actual and difference by seven points while the budget stays flat")
+let ribbonStart = weekdayDate(24, 9, 30)
+let ribbonClose = weekdayDate(24, 18, 30)
+let ribbonEnd = weekdayDate(25, 9, 30)
+let ribbonBaseline = [
+    QuotaTrendPoint(at: ribbonStart, remainingPercent: 100),
+    QuotaTrendPoint(at: ribbonClose, remainingPercent: 80),
+    QuotaTrendPoint(at: ribbonEnd, remainingPercent: 80),
+    QuotaTrendPoint(at: weekdayDate(25, 18, 30), remainingPercent: 60)
+]
+let ribbonActual = [QuotaTrendPoint(at: ribbonStart, remainingPercent: 90),
+                    QuotaTrendPoint(at: ribbonEnd, remainingPercent: 90)]
+let ribbons = QuotaTrendCalculator.budgetBands(actual: ribbonActual, baseline: ribbonBaseline)
+check(ribbons.map(\.isSurplus) == [false, true, true] &&
+      ribbons.first?.end.at == weekdayDate(24, 14) && ribbons.last?.end.at == ribbonEnd,
+      "Budget shading splits at the real crossing and stops at the last reading")
+check(ribbons.last?.start.at == ribbonClose && ribbons.last?.start.budget == 80 &&
+      ribbons.last?.end.budget == 80,
+      "The difference band follows a flat budget segment")
+let weekendOnly = QuotaWindow(kind: .weekly, usedPercent: 10, resetAt: weekdayDate(30, 12),
+                              durationSeconds: 24 * 3600, resetMode: .fixedCycle)
+check(QuotaTrendCalculator.evenBudgetLine(window: weekendOnly, calendar: workdayCalendar) == nil,
+      "No even budget is invented for a cycle without working time")
+let projection = QuotaTrendCalculator.forecast(window: trendWindow, now: workdayNow,
+                                               calendar: workdayCalendar)
+check(abs((projection?.remainingAtReset ?? -1) - 60) < 0.001,
+      "Trend projects the current cycle average across remaining working hours")
+let fasterWindow = QuotaWindow(kind: .weekly, usedPercent: 40, resetAt: workdayEnd,
+                               durationSeconds: trendWindow.durationSeconds, resetMode: .fixedCycle)
+let fasterProjection = QuotaTrendCalculator.forecast(window: fasterWindow, now: workdayNow,
+                                                     calendar: workdayCalendar)
+check(abs((fasterProjection?.remainingAtReset ?? -1) - 20) < 0.001,
+      "The reset forecast continues to respond to actual consumption")
+let exhaustedProjection = QuotaTrendCalculator.forecast(window: workdayWindow, now: workdayNow,
+                                                        calendar: workdayCalendar)
+check(exhaustedProjection?.remainingAtReset == 0 && exhaustedProjection?.exhaustionAt != nil &&
+      exhaustedProjection!.exhaustionAt! < workdayEnd,
+      "Forecast identifies quota exhaustion before reset")
+check(abs((exhaustedProjection?.exhaustionAt?.timeIntervalSince(weekdayDate(28, 4)) ?? 60)) < 1,
+      "Exhaustion can occur at night on a weekday")
+check(QuotaTrendCalculator.forecast(window: trendWindow, now: weekdayDate(24, 1),
+                                    calendar: workdayCalendar) == nil,
+      "Forecast waits for meaningful working-time progress")
+check(QuotaTrendCalculator.forecast(window: trendWindow, now: weekdayDate(29, 12),
+                                    calendar: workdayCalendar) == nil,
+      "Forecast is unavailable when no working hours remain")
+let repeatedQuotaPoints = [
+    QuotaTrendPoint(at: workdayNow, remainingPercent: 80),
+    QuotaTrendPoint(at: workdayNow.addingTimeInterval(1), remainingPercent: 80),
+    QuotaTrendPoint(at: workdayNow.addingTimeInterval(2), remainingPercent: 80),
+    QuotaTrendPoint(at: workdayNow.addingTimeInterval(3), remainingPercent: 79),
+    QuotaTrendPoint(at: workdayNow.addingTimeInterval(4), remainingPercent: 79)
+]
+check(QuotaTrendCalculator.nearestReading(to: workdayNow.addingTimeInterval(1.2), in: repeatedQuotaPoints)
+      == repeatedQuotaPoints[1], "The cursor selects a real reading even on an unchanged plateau")
+check(QuotaTrendCalculator.nearestReading(to: workdayNow.addingTimeInterval(2.5), in: repeatedQuotaPoints)
+      == repeatedQuotaPoints[2], "An equidistant cursor selects the earlier reading")
+check(QuotaTrendCalculator.nearestReading(to: workdayNow.addingTimeInterval(-100), in: repeatedQuotaPoints)
+      == repeatedQuotaPoints.first && QuotaTrendCalculator.nearestReading(to: workdayNow, in: []) == nil,
+      "Cursor lookup handles endpoints and missing history")
+let compactQuotaPoints = QuotaTrendCalculator.compactActualPoints(repeatedQuotaPoints)
+check(compactQuotaPoints.map(\.at) == [repeatedQuotaPoints[0].at, repeatedQuotaPoints[2].at,
+                                       repeatedQuotaPoints[3].at, repeatedQuotaPoints[4].at],
+      "Repeated readings keep the start and end of each actual quota level")
+
+let historyDirectory = FileManager.default.temporaryDirectory
+    .appendingPathComponent("quota-history-test-\(UUID().uuidString)", isDirectory: true)
+let historyURL = historyDirectory.appendingPathComponent("history.json")
+let history = QuotaHistory(url: historyURL)
+history.record(provider: .codex, identity: "account-a", window: trendWindow, at: workdayNow)
+history.record(provider: .codex, identity: nil, window: trendWindow, at: workdayNow)
+let restoredHistory = QuotaHistory(url: historyURL)
+check(restoredHistory.points(provider: .codex, identity: "account-a", window: trendWindow,
+                             at: workdayNow).count == 1,
+      "Quota history survives app restart when account identity is known")
+check(restoredHistory.points(provider: .codex, identity: nil, window: trendWindow,
+                             at: workdayNow).isEmpty,
+      "History with unknown identity is kept only in memory")
+check(restoredHistory.points(provider: .codex, identity: "account-b", window: trendWindow,
+                             at: workdayNow).isEmpty,
+      "Quota history does not mix accounts")
+let anotherCycle = QuotaWindow(kind: .weekly, usedPercent: 20,
+                               resetAt: workdayEnd.addingTimeInterval(7 * 86_400),
+                               durationSeconds: 7 * 86_400, resetMode: .fixedCycle)
+check(restoredHistory.points(provider: .codex, identity: "account-a", window: anotherCycle,
+                             at: workdayEnd).isEmpty,
+      "Quota history does not mix reset cycles")
+check(restoredHistory.points(provider: .codex, identity: "account-a", window: trendWindow,
+                             at: workdayNow.addingTimeInterval(-1)).isEmpty,
+      "Quota history does not display samples from the future")
+let importedPoint = QuotaTrendPoint(at: workdayNow.addingTimeInterval(-3600), remainingPercent: 88)
+history.importPoints([importedPoint, importedPoint], provider: .codex, identity: "account-a",
+                     window: trendWindow, now: workdayNow)
+let importedHistory = QuotaHistory(url: historyURL)
+check(importedHistory.points(provider: .codex, identity: "account-a", window: trendWindow,
+                             at: workdayNow).count == 2,
+      "Import persists historical quota samples without duplicates")
+history.importPoints([importedPoint], provider: .codex, identity: nil,
+                     window: trendWindow, now: workdayNow)
+check(QuotaHistory(url: historyURL).points(provider: .codex, identity: nil, window: trendWindow,
+                                          at: workdayNow).isEmpty,
+      "History without an account identity is never imported to disk")
+try? FileManager.default.removeItem(at: historyDirectory)
+let metadata = Data(#"{"type":"session_meta","payload":{"creator_account_id":"account-a"}}"#.utf8)
+let otherMetadata = Data(#"{"type":"session_meta","payload":{"creator_account_id":"account-b"}}"#.utf8)
+let accountHash = HistoryIdentity.hash(["codex", "account-a"])
+check(CodexQuotaLogParser.accountIdentity(metadata) == accountHash &&
+      CodexQuotaLogParser.accountIdentity(otherMetadata) != accountHash,
+      "Session quota history is associated with the correct account")
+let sampleTimestamp = Int(workdayNow.timeIntervalSince1970)
+let resetTimestamp = Int(workdayEnd.timeIntervalSince1970)
+let quotaEvent = Data("""
+{"timestamp":"2026-08-26T12:00:00Z","payload":{"type":"token_count","rate_limits":{"limit_id":"codex","primary":{"used_percent":35,"window_minutes":10080,"resets_at":\(resetTimestamp)}}}}
+""".utf8)
+let logPoint = CodexQuotaLogParser.point(quotaEvent, matching: trendWindow)
+check(logPoint?.at.timeIntervalSince1970 == Double(sampleTimestamp) && logPoint?.remainingPercent == 65,
+      "A matching Codex quota event yields its actual remaining percentage")
+check(CodexQuotaLogParser.point(quotaEvent, matching: anotherCycle) == nil,
+      "Events from a different quota cycle are ignored")
+let otherLimitEvent = Data(String(data: quotaEvent, encoding: .utf8)!.replacingOccurrences(of: "\"codex\"", with: "\"other\"").utf8)
+check(CodexQuotaLogParser.point(otherLimitEvent, matching: trendWindow) == nil,
+      "Events for another limit are ignored")
+let gatewayDayReset = weekdayDate(27, 0)
+let dailyGateway = GatewayQuota(name: "test", period: "day", alignment: "calendar",
+                                used: 40, limit: 100, input: nil, output: nil, cached: nil,
+                                resetAt: gatewayDayReset)
+let dailyGatewayWindow = dailyGateway.dailyWorkdayWindow(at: workdayNow, calendar: workdayCalendar)
+check(dailyGatewayWindow?.durationSeconds == 86_400 && dailyGatewayWindow?.remainingPercent == 60,
+      "Calendar-aligned gateway daily quota can use the same trend model")
+let dailyEvenBudget = dailyGatewayWindow.flatMap {
+    QuotaTrendCalculator.evenBudgetLine(window: $0, calendar: workdayCalendar)
+} ?? []
+check(dailyEvenBudget.first?.at == weekdayDate(26, 0) && dailyEvenBudget.first?.remainingPercent == 100 &&
+      QuotaTrendCalculator.remainingPercent(at: weekdayDate(26, 21), along: dailyEvenBudget) == 12.5 &&
+      dailyEvenBudget.last?.remainingPercent == 0,
+      "Daily gateway budget advances until the following local midnight")
+let unalignedGateway = GatewayQuota(name: "test", period: "day", alignment: nil,
+                                    used: 40, limit: 100, input: nil, output: nil, cached: nil,
+                                    resetAt: gatewayDayReset)
+check(unalignedGateway.dailyWorkdayWindow(at: workdayNow, calendar: workdayCalendar) == nil,
+      "Gateway trend does not assume an unverified daily cycle")
 check(DashboardCopy.tokenHeadline(TokenPace(
     todayTokens: 55_600_000,
     baselineTokens: 357_700_000,

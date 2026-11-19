@@ -109,6 +109,16 @@ public struct GatewayQuota: Equatable {
 
     public var remaining: Int64 { max(0, limit - used) }
     public var remainingPercent: Double { Double(remaining) / Double(limit) * 100 }
+
+    func dailyWorkdayWindow(at now: Date, calendar: Calendar = .current) -> QuotaWindow? {
+        guard period == "day", alignment == "calendar", let reset = resetAt,
+              calendar.startOfDay(for: reset) == reset,
+              let start = calendar.date(byAdding: .day, value: -1, to: reset),
+              now >= start, now < reset else { return nil }
+        return QuotaWindow(kind: .session, usedPercent: 100 - remainingPercent,
+                           resetAt: reset, durationSeconds: reset.timeIntervalSince(start),
+                           resetMode: .fixedCycle)
+    }
 }
 
 public struct ProviderSnapshot: Equatable {
@@ -120,6 +130,8 @@ public struct ProviderSnapshot: Equatable {
     public let gatewayQuota: GatewayQuota?
     public let updatedAt: Date
     public let sourceDescription: String
+    /// A one-way hash identifying the account or gateway rule for local history.
+    public let historyIdentity: String?
 
     public init(
         provider: ProviderID,
@@ -129,7 +141,8 @@ public struct ProviderSnapshot: Equatable {
         tokenPace: TokenPace? = nil,
         gatewayQuota: GatewayQuota? = nil,
         updatedAt: Date,
-        sourceDescription: String
+        sourceDescription: String,
+        historyIdentity: String? = nil
     ) {
         self.provider = provider
         self.planName = planName
@@ -139,6 +152,7 @@ public struct ProviderSnapshot: Equatable {
         self.gatewayQuota = gatewayQuota
         self.updatedAt = updatedAt
         self.sourceDescription = sourceDescription
+        self.historyIdentity = historyIdentity
     }
 
     public var tightestWindow: QuotaWindow? {

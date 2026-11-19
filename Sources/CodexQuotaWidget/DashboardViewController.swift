@@ -7,6 +7,10 @@ final class DashboardViewController: NSViewController {
     let store: QuotaStore
     var onRefresh: (() -> Void)?
     private let content = NSStackView()
+    private let scroll = NSScrollView()
+    private var documentHeight: CGFloat = 0
+    private var resetScrollPosition = true
+    private var pendingDistanceFromTop: CGFloat?
     private var selectedProvider: ProviderID = .codex
     private var errorDetail: String?
     private let contentWidth: CGFloat = 392
@@ -29,27 +33,52 @@ final class DashboardViewController: NSViewController {
         content.alignment = .leading
         content.spacing = 8
         content.edgeInsets = NSEdgeInsets(top: 20, left: 24, bottom: 18, right: 24)
-        content.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(content)
+        content.frame = NSRect(x: 0, y: 0, width: 440, height: 600)
+        scroll.translatesAutoresizingMaskIntoConstraints = false
+        scroll.drawsBackground = false
+        scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
+        scroll.scrollerStyle = .overlay
+        scroll.borderType = .noBorder
+        scroll.documentView = content
+        view.addSubview(scroll)
         NSLayoutConstraint.activate([
-            content.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            content.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            content.topAnchor.constraint(equalTo: view.topAnchor),
-            content.bottomAnchor.constraint(lessThanOrEqualTo: view.bottomAnchor)
+            scroll.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            scroll.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            scroll.topAnchor.constraint(equalTo: view.topAnchor),
+            scroll.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         ])
         rebuild()
     }
 
     func rebuild() {
         guard isViewLoaded else { return }
+        let distanceFromTop = resetScrollPosition ? 0 :
+            (pendingDistanceFromTop ?? max(0, documentHeight - scroll.contentView.bounds.maxY))
         content.arrangedSubviews.forEach { $0.removeFromSuperview() }
         addHeader()
         addProviderCards()
         addFreshness()
         if selectedProvider == .codex { addCodex() } else { addGateway() }
         addFooter()
-        let height = max(300, min(700, ceil(content.fittingSize.height)))
+        let contentHeight = ceil(content.fittingSize.height)
+        let screenLimit = max(300, (NSScreen.main?.visibleFrame.height ?? 732) - 32)
+        let height = max(300, min(700, screenLimit, contentHeight))
+        documentHeight = max(height, contentHeight)
+        content.setFrameSize(NSSize(width: 440, height: documentHeight))
         preferredContentSize = NSSize(width: 440, height: height)
+        pendingDistanceFromTop = distanceFromTop
+        view.needsLayout = true
+        resetScrollPosition = false
+    }
+
+    override func viewDidLayout() {
+        super.viewDidLayout()
+        guard let distance = pendingDistanceFromTop else { return }
+        pendingDistanceFromTop = nil
+        let visibleHeight = scroll.contentView.bounds.height
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: max(0, documentHeight - visibleHeight - distance)))
+        scroll.reflectScrolledClipView(scroll.contentView)
     }
 
     private func addHeader() {
@@ -154,9 +183,8 @@ final class DashboardViewController: NSViewController {
             content.addArrangedSubview(label("Codex 没有返回周额度", size: 14, color: .secondaryLabelColor))
             return
         }
-        addQuotaHeading(title: "Codex 周额度", remaining: weekly.remainingPercent,
-                        detail: "已用 \(Self.percent(weekly.usedPercent))%",
-                        reset: weekly.resetAt, tint: DashboardPalette.codex)
+        addQuotaTrend(snapshot: snapshot, window: weekly, title: "Codex 周额度",
+                      detail: "已用 \(Self.percent(weekly.usedPercent))%", tint: DashboardPalette.codex)
         if let session = snapshot.windows.first(where: { $0.kind == .session }) {
             let reset = session.resetAt.map { Self.countdown(to: $0) } ?? "重置时间未知"
             content.addArrangedSubview(label("5 小时额度  剩余 \(Self.percent(session.remainingPercent))%  ·  \(reset)",
@@ -237,9 +265,14 @@ final class DashboardViewController: NSViewController {
         case "month": title = "企业网关月额度"
         default: title = "企业网关额度"
         }
-        addQuotaHeading(title: title, remaining: quota.remainingPercent,
-                        detail: "已用 \(Self.tokens(quota.used)) / \(Self.tokens(quota.limit)) Token",
-                        reset: quota.resetAt, tint: DashboardPalette.gateway)
+        let detail = "已用 \(Self.tokens(quota.used)) / \(Self.tokens(quota.limit)) Token"
+        if let window = store.trendWindow(for: snapshot) {
+            addQuotaTrend(snapshot: snapshot, window: window, title: title,
+                          detail: detail, tint: DashboardPalette.gateway)
+        } else {
+            addQuotaHeading(title: title, remaining: quota.remainingPercent, detail: detail,
+                            reset: quota.resetAt, tint: DashboardPalette.gateway)
+        }
         addDivider()
         let paceTime = store.errors[.zcode] == nil ? Date() : snapshot.updatedAt
         addGatewaySpeed(quota, at: paceTime)
@@ -258,14 +291,10 @@ final class DashboardViewController: NSViewController {
 
     private func addGatewaySpeed(_ quota: GatewayQuota, at now: Date) {
         content.addArrangedSubview(label("当日平均速度", size: 14, weight: .semibold))
-        guard quota.period == "day", quota.alignment == "calendar", let reset = quota.resetAt,
-              Calendar.current.startOfDay(for: reset) == reset,
-              now >= reset.addingTimeInterval(-86_400), now < reset else {
+        guard let window = quota.dailyWorkdayWindow(at: now) else {
             content.addArrangedSubview(label("当前周期无法计算日速度", size: 12, color: .secondaryLabelColor))
             return
         }
-        let window = QuotaWindow(kind: .session, usedPercent: 100 - quota.remainingPercent,
-                                 resetAt: reset, durationSeconds: 86_400, resetMode: .fixedCycle)
         guard let budget = QuotaPaceCalculator.workdayBudget(window: window, now: now) else {
             content.addArrangedSubview(label("周末不计算工作日速度", size: 12, color: .secondaryLabelColor))
             return
@@ -283,24 +312,131 @@ final class DashboardViewController: NSViewController {
                                          size: 12, color: .secondaryLabelColor))
     }
 
+    private func addQuotaTrend(snapshot: ProviderSnapshot, window: QuotaWindow, title: String,
+                               detail: String, tint: NSColor) {
+        guard let reset = window.resetAt, window.durationSeconds > 0 else {
+            addQuotaHeading(title: title, remaining: window.remainingPercent, detail: detail,
+                            reset: window.resetAt, tint: tint)
+            content.addArrangedSubview(label("周期信息不完整，暂时无法显示走势", size: 12,
+                                             color: .secondaryLabelColor))
+            return
+        }
+        let now = Date()
+        let baseline = QuotaTrendCalculator.evenBudgetLine(window: window) ?? []
+        let readingBudget = QuotaTrendCalculator.remainingPercent(at: snapshot.updatedAt, along: baseline)
+        let assessment = forecastText(snapshot: snapshot, window: window, reset: reset, now: now, tint: tint)
+        addQuotaHeading(title: title, remaining: window.remainingPercent, detail: detail,
+                        reset: reset, tint: tint, budget: readingBudget, forecast: assessment)
+        addActualTrend(snapshot: snapshot, window: window, baseline: baseline, tint: tint)
+
+        let resetLabel = label("\(Self.resetTime(reset, now: now)) 重置", size: 12, color: .secondaryLabelColor)
+        resetLabel.toolTip = Self.countdown(to: reset)
+        content.addArrangedSubview(resetLabel)
+    }
+
+    private func forecastText(snapshot: ProviderSnapshot, window: QuotaWindow, reset: Date,
+                              now: Date, tint: NSColor) -> (text: String, color: NSColor) {
+        if store.errors[snapshot.provider] != nil {
+            return ("更新失败，预测已暂停", DashboardPalette.warning)
+        }
+        if reset <= now { return ("等待额度重置", .secondaryLabelColor) }
+        if let forecast = QuotaTrendCalculator.forecast(window: window, now: snapshot.updatedAt) {
+            if let exhausted = forecast.exhaustionAt {
+                let text = exhausted <= snapshot.updatedAt ? "额度已用尽" : "预计 \(Self.trendDate(exhausted)) 用尽"
+                return (text, DashboardPalette.warning)
+            }
+            return ("重置时预计剩余 \(Self.percent(forecast.remainingAtReset))%", tint)
+        }
+        guard let budget = QuotaPaceCalculator.workdayBudget(window: window, now: snapshot.updatedAt) else {
+            return ("本周期没有工作日", .secondaryLabelColor)
+        }
+        if budget.remainingWorkdays <= 0.000_001 {
+            return ("本周期工作日已结束", .secondaryLabelColor)
+        }
+        return ("周期刚开始，预测待观察", .secondaryLabelColor)
+    }
+
+    private func addActualTrend(snapshot: ProviderSnapshot, window: QuotaWindow,
+                                baseline: [QuotaTrendPoint], tint: NSColor) {
+        let points = store.trendPoints(for: snapshot, window: window)
+        let heading = label("实际走势", size: 13, weight: .semibold)
+        content.addArrangedSubview(heading)
+        content.setCustomSpacing(3, after: heading)
+        if let first = points.first, let last = points.last, first.at < last.at {
+            let chart = QuotaTrendView(actual: points, baseline: baseline, tint: tint)
+            chart.widthAnchor.constraint(equalToConstant: contentWidth).isActive = true
+            content.addArrangedSubview(chart)
+            content.setCustomSpacing(3, after: chart)
+        } else {
+            let status = snapshot.provider == .codex && store.isLoadingTokens
+                ? "正在恢复实际记录…" : "正在积累实际记录…"
+            content.addArrangedSubview(label(status, size: 11, color: .secondaryLabelColor))
+        }
+        if store.historySaveFailed || snapshot.historyIdentity == nil {
+            let note = store.historySaveFailed ? "历史记录暂时无法保存" : "实际记录仅保留在本次运行中"
+            content.addArrangedSubview(label(note, size: 11, color: .secondaryLabelColor))
+        }
+    }
+
+    private static func resetTime(_ date: Date, now: Date) -> String {
+        let calendar = Calendar.current
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = calendar.isDate(date, inSameDayAs: now) ? "'今天' HH:mm" : "EEE HH:mm"
+        return formatter.string(from: date)
+    }
+
+    private static func trendDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MM-dd HH:mm"
+        return formatter.string(from: date)
+    }
+
     private func addQuotaHeading(title: String, remaining: Double, detail: String,
-                                 reset: Date?, tint: NSColor) {
-        content.addArrangedSubview(label(title, size: 14, weight: .semibold))
+                                 reset: Date?, tint: NSColor, budget: Double? = nil,
+                                 forecast: (text: String, color: NSColor)? = nil) {
+        let heading = horizontalRow()
+        heading.distribution = .equalSpacing
+        heading.addArrangedSubview(label(title, size: 14, weight: .semibold))
+        if let forecast {
+            let text = label(forecast.text, size: 12, weight: .medium, color: forecast.color)
+            heading.addArrangedSubview(text)
+        }
+        content.addArrangedSubview(heading)
         let row = horizontalRow()
         let value = label("\(Self.percent(remaining))%", size: 28, weight: .semibold, color: tint)
         value.font = .monospacedDigitSystemFont(ofSize: 28, weight: .semibold)
-        row.addArrangedSubview(value)
-        row.addArrangedSubview(label("剩余", size: 13, color: .secondaryLabelColor))
+        let actual = NSStackView(views: [value, label("实际剩余", size: 12, color: .secondaryLabelColor)])
+        actual.orientation = .horizontal
+        actual.alignment = .centerY
+        actual.spacing = 6
+        row.distribution = .equalSpacing
+        row.addArrangedSubview(actual)
+        if let budget {
+            let target = label("预算剩余 \(Self.percent(budget))%", size: 13, weight: .medium)
+            target.font = .monospacedDigitSystemFont(ofSize: 13, weight: .medium)
+            target.toolTip = "刻度位置按本次读数时的工作时间计算"
+            row.addArrangedSubview(target)
+        }
         content.addArrangedSubview(row)
+        content.setCustomSpacing(4, after: row)
         let bar = LevelBar()
         bar.percent = remaining
         bar.tint = tint
+        bar.markerPercent = budget
         bar.widthAnchor.constraint(equalToConstant: contentWidth).isActive = true
-        bar.heightAnchor.constraint(equalToConstant: 8).isActive = true
+        bar.heightAnchor.constraint(equalToConstant: budget == nil ? 8 : 13).isActive = true
         content.addArrangedSubview(bar)
-        let resetText = reset.map { Self.countdown(to: $0) } ?? "重置时间未知"
-        content.addArrangedSubview(label("\(detail)  ·  \(resetText)", size: 12,
-                                         color: .secondaryLabelColor))
+        content.setCustomSpacing(4, after: bar)
+        if forecast == nil {
+            let resetText = reset.map { Self.countdown(to: $0) } ?? "重置时间未知"
+            content.addArrangedSubview(label("\(detail) · \(resetText)", size: 11, color: .secondaryLabelColor))
+        } else {
+            bar.toolTip = detail
+            if selectedProvider == .zcode {
+                content.addArrangedSubview(label(detail, size: 11, color: .secondaryLabelColor))
+            }
+        }
     }
 
     private func metricRow(_ title: String, percent: Double, tint: NSColor) -> NSStackView {
@@ -376,6 +512,7 @@ final class DashboardViewController: NSViewController {
 
     @objc private func selectProvider(_ sender: NSButton) {
         selectedProvider = sender.tag == 0 ? .codex : .zcode
+        resetScrollPosition = true
         rebuild()
     }
     @objc private func refresh() { onRefresh?() }
@@ -392,7 +529,7 @@ final class DashboardViewController: NSViewController {
     @objc private func showMethod() {
         let alert = NSAlert()
         alert.messageText = "统计说明"
-        alert.informativeText = "工作日速度 = 本周期额度已用比例 ÷ 本周期工作日已过比例。1.00× 为均匀节奏；低于 0.80× 显示偏慢，高于 1.20× 显示偏快。周期初期工作日进度不足 5% 时暂不判断。Codex 剩余每日可用比例 = 剩余额度 ÷ 重置前剩余工作日。工作日按周一至周五全天计算，暂不识别法定节假日和调休。\n\nCodex 额度来自本机 app-server，Token 对比来自本机会话日志。ZCode 数据来自企业网关中配置的消费者和额度规则；网关为日周期时，可计算工作日当天的速度。"
+        alert.informativeText = "工作日速度 = 本周期额度已用比例 ÷ 本周期工作日已过比例。1.00× 为均匀节奏。低于 0.80× 显示偏慢，高于 1.20× 显示偏快。周期初期工作日进度不足 5% 时暂不判断。工作日按本地时间周一至周五全天计算，暂不识别法定节假日和调休。\n\n额度条上的刻度是本次读数对应的预算剩余。实际走势按采样时间连线。下图显示实际剩余减去预算剩余，绿色为正，橙色为负。两张图共用时间轴，移动指针可查看最近一次记录及当时的预算。周末预算保持水平。\n\n重置时预计剩余按本周期实际平均消耗计算，夜间和周末的实际使用也会影响下一次预测。Codex 额度来自本机 app-server，历史和 Token 对比来自本机会话日志。ZCode 数据来自企业网关中配置的消费者和额度规则，按本地自然日重置时可计算当天的速度和预算。"
         alert.addButton(withTitle: "知道了")
         alert.runModal()
     }

@@ -4,8 +4,9 @@ import QuotaCore
 #endif
 
 struct CodexTokenResult {
-    let breakdown: TokenBreakdown
+    let breakdown: TokenBreakdown?
     let pace: TokenPace?
+    let quotaPoints: [QuotaTrendPoint]
 }
 
 enum CodexTokenLogReader {
@@ -13,13 +14,16 @@ enum CodexTokenLogReader {
         var offset: UInt64 = 0
         var remainder = Data()
         var events: [CodexTokenEvent] = []
+        var accountIdentity: String?
+        var quotaEvents: [CodexQuotaLogEvent] = []
     }
 
     private static let cacheLock = NSLock()
     private static var fileCache: [String: FileCache] = [:]
     private static let tokenMarker = Data(#""type":"token_count""#.utf8)
 
-    static func read(now: Date, fileManager: FileManager = .default) -> CodexTokenResult? {
+    static func read(now: Date, historyIdentity: String?, window: QuotaWindow?,
+                     fileManager: FileManager = .default) -> CodexTokenResult? {
         cacheLock.lock()
         defer { cacheLock.unlock() }
         let home = fileManager.homeDirectoryForCurrentUser
@@ -35,6 +39,7 @@ enum CodexTokenLogReader {
 
         let cutoff = Calendar.current.date(byAdding: .day, value: -8, to: now) ?? .distantPast
         var events: [CodexTokenEvent] = []
+        var quotaPoints: [QuotaTrendPoint] = []
         var seenPaths = Set<String>()
         for root in roots where fileManager.fileExists(atPath: root.path) {
             guard let enumerator = fileManager.enumerator(
@@ -50,19 +55,21 @@ enum CodexTokenLogReader {
                 var cached = fileCache[path] ?? FileCache()
                 cached = scan(file: file, cached: cached)
                 cached.events.removeAll { $0.timestamp < cutoff }
+                cached.quotaEvents.removeAll { $0.point.at < cutoff }
                 fileCache[path] = cached
                 events.append(contentsOf: cached.events)
+                if let historyIdentity, let window, cached.accountIdentity == historyIdentity {
+                    quotaPoints.append(contentsOf: cached.quotaEvents.filter { $0.matches(window) }.map(\.point))
+                }
             }
         }
         fileCache = fileCache.filter { seenPaths.contains($0.key) }
-        guard !events.isEmpty else { return nil }
-
-        guard let summary = CodexTokenAggregator.summarize(events: events, now: now) else {
-            return nil
-        }
+        let summary = CodexTokenAggregator.summarize(events: events, now: now)
+        guard summary != nil || !quotaPoints.isEmpty else { return nil }
         return CodexTokenResult(
-            breakdown: summary.breakdown,
-            pace: summary.pace
+            breakdown: summary?.breakdown,
+            pace: summary?.pace,
+            quotaPoints: QuotaTrendCalculator.compactActualPoints(quotaPoints)
         )
     }
 
@@ -88,9 +95,11 @@ enum CodexTokenLogReader {
             var consumed = buffer.startIndex
             while let newline = buffer[consumed...].firstIndex(of: 0x0A) {
                 let line = Data(buffer[consumed..<newline])
-                if line.range(of: tokenMarker) != nil,
-                   let event = try? CodexTokenEventParser.parse(data: line) {
-                    cached.events.append(event)
+                if line.range(of: tokenMarker) != nil {
+                    if let event = try? CodexTokenEventParser.parse(data: line) { cached.events.append(event) }
+                    if cached.accountIdentity != nil, let event = CodexQuotaLogParser.event(line) {
+                        cached.quotaEvents.append(event)
+                    }
                 }
                 consumed = buffer.index(after: newline)
             }
@@ -117,9 +126,30 @@ enum CodexTokenLogReader {
         guard process.terminationStatus == 0 || process.terminationStatus == 1 else {
             return FileCache()
         }
-        let events = data.split(separator: 0x0A).compactMap {
-            try? CodexTokenEventParser.parse(data: Data($0))
+        let identity = readAccountIdentity(file)
+        var cached = FileCache(offset: size, remainder: Data(), accountIdentity: identity)
+        for line in data.split(separator: 0x0A) {
+            let eventData = Data(line)
+            if let event = try? CodexTokenEventParser.parse(data: eventData) { cached.events.append(event) }
+            if identity != nil, let event = CodexQuotaLogParser.event(eventData) {
+                cached.quotaEvents.append(event)
+            }
         }
-        return FileCache(offset: size, remainder: Data(), events: events)
+        return cached
+    }
+
+    private static func readAccountIdentity(_ file: URL) -> String? {
+        guard let handle = try? FileHandle(forReadingFrom: file) else { return nil }
+        defer { try? handle.close() }
+        var line = Data()
+        while line.count < 2 * 1024 * 1024,
+              let chunk = try? handle.read(upToCount: 64 * 1024), !chunk.isEmpty {
+            if let newline = chunk.firstIndex(of: 0x0A) {
+                line.append(chunk[..<newline])
+                return CodexQuotaLogParser.accountIdentity(line)
+            }
+            line.append(chunk)
+        }
+        return nil
     }
 }

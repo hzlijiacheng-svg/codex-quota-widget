@@ -102,10 +102,20 @@ final class CodexProvider: QuotaProvider {
         try Self.send(["method": "account/rateLimits/read", "id": 2],
                       to: input.fileHandleForWriting)
         let response = try Self.response(id: 2, reader: reader)
-        return try Self.parse(response: response, now: now)
+        var identity = (response["result"] as? [String: Any])?["accountId"] as? String
+        if identity == nil {
+            try? Self.send(["method": "account/read", "id": 3,
+                            "params": ["refreshToken": false]], to: input.fileHandleForWriting)
+            if let accountResponse = try? Self.response(id: 3, reader: reader),
+               let account = (accountResponse["result"] as? [String: Any])?["account"] as? [String: Any],
+               let email = account["email"] as? String {
+                identity = "\(email)|\(account["workspaceName"] as? String ?? "")"
+            }
+        }
+        return try Self.parse(response: response, now: now, identity: identity)
     }
 
-    private static func parse(response: [String: Any], now: Date) throws -> ProviderSnapshot {
+    private static func parse(response: [String: Any], now: Date, identity: String?) throws -> ProviderSnapshot {
         guard let result = response["result"] as? [String: Any] else {
             throw WidgetError.invalidResponse
         }
@@ -139,7 +149,8 @@ final class CodexProvider: QuotaProvider {
             planName: rateLimit["planType"] as? String,
             windows: windows,
             updatedAt: now,
-            sourceDescription: "Codex 本地 app-server"
+            sourceDescription: "Codex 本地 app-server",
+            historyIdentity: identity.map { HistoryIdentity.hash(["codex", $0]) }
         )
     }
 

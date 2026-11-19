@@ -9,6 +9,8 @@ enum DashboardPalette {
                                    dark: .systemGreen)
     static let warning = adaptive(light: NSColor(calibratedRed: 0.57, green: 0.26, blue: 0.00, alpha: 1),
                                   dark: .systemOrange)
+    static let budgetSurplus = adaptive(light: NSColor(srgbRed: 0.04, green: 0.45, blue: 0.31, alpha: 1),
+                                        dark: NSColor(srgbRed: 0.36, green: 0.77, blue: 0.63, alpha: 1))
 
     private static func adaptive(light: NSColor, dark: NSColor) -> NSColor {
         NSColor(name: nil) { appearance in
@@ -20,17 +22,29 @@ enum DashboardPalette {
 final class LevelBar: NSView {
     var percent: Double = 0 { didSet { needsDisplay = true } }
     var tint: NSColor = .systemBlue { didSet { needsDisplay = true } }
+    var markerPercent: Double? { didSet { needsDisplay = true } }
 
     override var intrinsicContentSize: NSSize { NSSize(width: 112, height: 10) }
 
     override func draw(_ dirtyRect: NSRect) {
-        let track = NSBezierPath(roundedRect: bounds, xRadius: 5, yRadius: 5)
-        NSColor.labelColor.withAlphaComponent(0.12).setFill(); track.fill()
-        let width = bounds.width * CGFloat(min(100, max(0, percent))) / 100
-        guard width > 0 else { return }
-        tint.setFill()
-        NSBezierPath(roundedRect: NSRect(x: 0, y: 0, width: width, height: bounds.height),
-                     xRadius: 5, yRadius: 5).fill()
+        let track = markerPercent == nil ? bounds : bounds.insetBy(dx: 0, dy: 2)
+        let radius = track.height / 2
+        NSColor.labelColor.withAlphaComponent(0.12).setFill()
+        NSBezierPath(roundedRect: track, xRadius: radius, yRadius: radius).fill()
+
+        let width = track.width * CGFloat(min(100, max(0, percent))) / 100
+        if width > 0 {
+            let fill = NSRect(x: track.minX, y: track.minY, width: width, height: track.height)
+            tint.setFill()
+            NSBezierPath(roundedRect: fill, xRadius: min(radius, width / 2), yRadius: radius).fill()
+        }
+
+        if let markerPercent {
+            let position = track.minX + track.width * CGFloat(min(100, max(0, markerPercent))) / 100
+            let x = min(bounds.maxX - 1, max(bounds.minX + 1, position))
+            NSColor.labelColor.setFill()
+            NSBezierPath(rect: NSRect(x: x - 1, y: bounds.minY, width: 2, height: bounds.height)).fill()
+        }
     }
 }
 
